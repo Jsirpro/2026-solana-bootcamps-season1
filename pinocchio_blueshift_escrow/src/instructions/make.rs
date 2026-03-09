@@ -33,8 +33,8 @@ pub struct MakeAccounts<'a> {               // MakeAccounts：封装 Make 指令
 // 检查 MakeAccounts 的实现，从原始账户数组中解析并校验
 impl<'a> TryFrom<&'a [AccountView]> for MakeAccounts<'a> { // 为 MakeAccounts 实现 TryFrom，输入为账户切片
     type Error = ProgramError;                              // 解析失败时返回 ProgramError
-  
-    fn try_from(accounts: &'a [AccountView]) -> Result<Self, Self::Error> { // 从账户数组构造 MakeAccounts
+    // 从账户数组构造 MakeAccounts
+    fn try_from(accounts: &'a [AccountView]) -> Result<Self, Self::Error> { 
         let [                                                   // 使用解构模式按顺序取出各账户
             maker,                                              // 0: 发起方
             escrow,                                             // 1: 托管账户
@@ -49,7 +49,8 @@ impl<'a> TryFrom<&'a [AccountView]> for MakeAccounts<'a> { // 为 MakeAccounts �
             return Err(ProgramError::NotEnoughAccountKeys);     // 账户数量不足错误
         };
   
-        // Basic Accounts Checks                               // 基础账户合法性检查
+        // Basic Accounts Checks
+        //因为很多账号都需要确认信息，所以把检查相关代码都写在helpers.rs里。
         SignerAccount::check(maker)?;                          // 确认 maker 是签名者
         MintInterface::check(mint_a)?;                         // 检查 mint_a 是否为合法的 mint 账户
         MintInterface::check(mint_b)?;                         // 检查 mint_b 是否为合法的 mint 账户
@@ -74,7 +75,7 @@ impl<'a> TryFrom<&'a [AccountView]> for MakeAccounts<'a> { // 为 MakeAccounts �
     }
 }
 
-/*===================*Make指令数据结构=======================*/   
+/*===================escrow账户=======================*/   
 pub struct MakeInstructionData {            // MakeInstructionData：封装 Make 指令的参数
     pub seed: u64,                          // seed：PDA 派生用的种子（业务自定义）
     pub receive: u64,                       // receive：期望收到的 token B 数量
@@ -107,22 +108,21 @@ impl<'a> TryFrom<&'a [u8]> for MakeInstructionData { // 输入为指令数据字
     }
 }
 
-/*===================初始化vault账户=======================*/    
+/*==========================================*/    
 // 定义 Make 指令执行对象，包含账户、数据与 bump
 pub struct Make<'a> {                         // Make：执行 Make 指令所需的上下文
     pub accounts: MakeAccounts<'a>,           // accounts：前面解析好的账户集合
     pub instruction_data: MakeInstructionData,// instruction_data：前面解析好的指令参数
     pub bump: u8,                             // bump：escrow PDA 的 bump 值
 }
-  
+//创建Make指令所需的PDA  ATA 账户
 impl<'a> TryFrom<(&'a [u8], &'a [AccountView])> for Make<'a> { // 为 Make 实现 TryFrom<(data, accounts)>
     type Error = ProgramError;                                 // 错误类型同样为 ProgramError
     
     fn try_from((data, accounts): (&'a [u8], &'a [AccountView])) -> Result<Self, Self::Error> { // 从指令数据与账户数组构造 Make
         let accounts = MakeAccounts::try_from(accounts)?;      // 先解析并检查账户集合
-        let instruction_data = MakeInstructionData::try_from(data)?; // 再解析并检查指令数据
+        let instruction_data = MakeInstructionData::try_from(data)?; // 再解析escrow账户所需数据
   
-        // Initialize the Accounts needed                    // 初始化本指令所需的 PDA 等账户
         let (_, bump) = Address::find_program_address(        // 根据种子派生 escrow PDA，并获得 bump
             &[
                 b"escrow",                                   // 固定前缀 "escrow"
@@ -140,15 +140,15 @@ impl<'a> TryFrom<(&'a [u8], &'a [AccountView])> for Make<'a> { // 为 Make 实�
             Seed::from(&seed_binding),                        // 种子 3：业务 seed
             Seed::from(&bump_binding),                        // 种子 4：bump
         ];
-              
-        ProgramAccount::init::<Escrow>(                       // 使用 ProgramAccount 辅助初始化 Escrow 账户
+        // 使用 ProgramAccount 辅助初始化 Escrow 账户:数据账户    
+        ProgramAccount::init::<Escrow>(                       
             accounts.maker,                                   // 付费者账户（创建 PDA 支付租金）
             accounts.escrow,                                  // 目标 escrow 账户（PDA）
             &escrow_seeds,                                    // 用于签名的 PDA 种子
             Escrow::LEN,                                      // Escrow 账户数据长度
         )?;
   
-        // Initialize the vault                             // 初始化 vault ATA 账户
+        // 初始化 vault ATA 账户
         AssociatedTokenAccount::init(                        // 调用 ATA 辅助初始化 vault
             accounts.vault,                                  // vault ATA 账户
             accounts.mint_a,                                 // mint_a，表示要锁定的 token 类型
@@ -175,8 +175,9 @@ impl<'a> Make<'a> {                        // 为 Make 实现方法
         // let mut data = self.accounts.escrow.try_borrow_mut_data()?; // 旧写法：直接借用数据字段
         let mut data = self.accounts.escrow.try_borrow_mut()?;        // 新写法：借用整个账户并获取可变引用
         let escrow = Escrow::load_mut(data.as_mut())?;                // 使用 Escrow::load_mut 将原始数据映射为 Escrow 结构
-      
-        escrow.set_inner(                                             // 调用 Escrow::set_inner 写入业务数据
+        
+        //在state.rs里为Escrow实现了set_inner方法
+        escrow.set_inner(                                             
             self.instruction_data.seed,                               // 记录 seed（用于后续 PDA 复现）
             self.accounts.maker.address().clone(),                    // 记录发起方地址
             self.accounts.mint_a.address().clone(),                   // 记录 token A 的 mint 地址

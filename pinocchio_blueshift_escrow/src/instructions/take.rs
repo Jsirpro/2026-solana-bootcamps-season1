@@ -31,12 +31,14 @@ impl<'a> TryFrom<&'a [AccountView]> for TakeAccounts<'a> {
   type Error = ProgramError;
 
   fn try_from(accounts: &'a [AccountView]) -> Result<Self, Self::Error> {
+    //检查账户顺序和数量
     let [taker, maker, escrow, mint_a, mint_b, vault, taker_ata_a, taker_ata_b, maker_ata_b, system_program, token_program, _] = accounts else {
       return Err(ProgramError::NotEnoughAccountKeys);
      };
 
     // Basic Accounts Checks
     SignerAccount::check(taker)?;
+    //验证程序账户的DATA长度是否等于0
     ProgramAccount::check(escrow)?;
     MintInterface::check(mint_a)?;
     MintInterface::check(mint_b)?;
@@ -72,7 +74,8 @@ impl<'a> TryFrom<&'a [AccountView]> for Take<'a> {
   fn try_from(accounts: &'a [AccountView]) -> Result<Self, Self::Error> {
     let accounts = TakeAccounts::try_from(accounts)?;
 
-    // Initialize necessary accounts
+    // take流程是TOKEN_a转给taker，TOKEN_b转给maker，所以要
+    //验证双方是否有相应的ATA账户，如果没有则需要创建
     AssociatedTokenAccount::init_if_needed(
       accounts.taker_ata_a,
       accounts.mint_a,
@@ -99,11 +102,14 @@ impl<'a> TryFrom<&'a [AccountView]> for Take<'a> {
 
 /*===================指令逻辑=======================*/
 impl<'a> Take<'a> {
+    //定义Take的DISCRIMINATOR为1
     pub const DISCRIMINATOR: &'a u8 = &1;
     
     pub fn process(&mut self) -> ProgramResult {
       log!("[Take] process start");
+      //try_borrow():创建一个不可变引用，用于取出escrow中的data的值
       let data = self.accounts.escrow.try_borrow()?;
+      //把data从&[u8]格式转换成struct格式
       let escrow = Escrow::load(&data)?;
 
       // Check if the escrow is valid

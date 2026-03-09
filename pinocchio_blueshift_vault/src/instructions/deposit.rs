@@ -31,7 +31,7 @@ impl<'a> TryFrom<&'a [AccountView]> for DepositAccounts<'a> {
         if vault.lamports().ne(&0) {
             return Err(ProgramError::InvalidAccountData);
         }
-
+        //计算vault地址并和vault.address()对比
         let (vault_key, _) = Address::find_program_address(&[b"vault", owner.address().as_ref()], &crate::ID);
         if vault.address().ne(&vault_key) {
             return Err(ProgramError::InvalidAccountOwner);
@@ -43,11 +43,11 @@ impl<'a> TryFrom<&'a [AccountView]> for DepositAccounts<'a> {
 }
 
 
-/*======================指令账户机构===============================*/
+/*======================指令数据机构===============================*/
 pub struct DepositInstructionData {
     pub amount: u64,
 }
-//检查指令账户
+//检查指令数据
 impl<'a> TryFrom<&'a [u8]> for DepositInstructionData {
     type Error = ProgramError;
 
